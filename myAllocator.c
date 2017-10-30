@@ -5,7 +5,7 @@
 #include "myAllocator.h"
 
 /*
-  This is a simple endogenous first-fit allocator.  
+  This is a simple endogenous first-fit allocator.
 
   Each allocated memory region is sandwiched between a "BlockPrefix"
   and a "BlockSuffix".  All block info is stored in its BlockPrefix.
@@ -18,12 +18,12 @@
   Such a block can be marked as allcated by setting its "allocated"
   field.  The usable space between a block's prefix &
   suffix (extent - (prefixSize+suffixSize) is computed by
-  usableSpace().  
+  usableSpace().
 
   All blocks are allocated from an arena extending from arenaBegin to
   arenaEnd.  In particular, the first block's prefix is at address
   arenaBegin, and the last block's suffix is at address
-  arenaEnd-suffixSize. 
+  arenaEnd-suffixSize.
 
   This allocator generally refers to a block by the address of its
   prefix.  The address of the prefix to block b's successor is the
@@ -34,7 +34,7 @@
 
   The method findFirstFit() searches the arena for a sufficiently
   large free block.  Adjacent free blocks can be coalesced:  See
-  coalescePrev(),   coalesce().  
+  coalescePrev(),   coalesce().
 
   Functions regionToBlock() and blockToRegion() convert between
   prefixes & the first available address within the block.
@@ -331,4 +331,3 @@ void *resizeRegion(void *r, size_t newSize){
         return (void *)n;
     }
 }
-
