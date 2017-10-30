@@ -8,11 +8,13 @@
 
 /* first, the standard malloc functions */
 
-void *malloc(size_t NBYTES) {
+/*void *malloc(size_t NBYTES) {
   return firstFitAllocRegion(NBYTES);
+}*/
+
+void *malloc(size_t NBYTES) {
+    return nextFitAllocRegion(NBYTES);
 }
-
-
 
 void *realloc(void *APTR, size_t NBYTES) {
   return resizeRegion(APTR, NBYTES);

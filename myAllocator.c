@@ -56,89 +56,89 @@
 const size_t DEFAULT_BRKSIZE = 0x100000;	/* 1M */
 
 /* create a block, mark it as free */
-BlockPrefix_t *makeFreeBlock(void *addr, size_t size) { 
-  BlockPrefix_t *p = addr;
-  void *limitAddr = addr + size;
-  BlockSuffix_t *s = limitAddr - align8(sizeof(BlockSuffix_t));
-  p->suffix = s;
-  s->prefix = p;
-  p->allocated = 0;
-  return p;
+BlockPrefix_t *makeFreeBlock(void *addr, size_t size){
+    BlockPrefix_t *p = addr;
+    void *limitAddr = addr + size;
+    BlockSuffix_t *s = limitAddr - align8(sizeof(BlockSuffix_t));
+    p->suffix = s;
+    s->prefix = p;
+    p->allocated = 0;
+    return p;
 }
 
 /* lowest & highest address in arena (global vars) */
 BlockPrefix_t *arenaBegin = (void *)0;
 void *arenaEnd = 0;
 
-void initializeArena() {
+void initializeArena(){
     if (arenaBegin != 0)	/* only initialize once */
-	return; 
+        return;
     arenaBegin = makeFreeBlock(sbrk(DEFAULT_BRKSIZE), DEFAULT_BRKSIZE);
     arenaEnd = ((void *)arenaBegin) + DEFAULT_BRKSIZE;
 }
 
-size_t computeUsableSpace(BlockPrefix_t *p) { /* useful space within a block */
+size_t computeUsableSpace(BlockPrefix_t *p){ /* useful space within a block */
     void *prefix_end = ((void*)p) + prefixSize;
     return ((void *)(p->suffix)) - (prefix_end);
 }
 
-BlockPrefix_t *computeNextPrefixAddr(BlockPrefix_t *p) { 
+BlockPrefix_t *computeNextPrefixAddr(BlockPrefix_t *p){
     return ((void *)(p->suffix)) + suffixSize;
 }
 
-BlockSuffix_t *computePrevSuffixAddr(BlockPrefix_t *p) {
+BlockSuffix_t *computePrevSuffixAddr(BlockPrefix_t *p){
     return ((void *)p) - suffixSize;
 }
 
-BlockPrefix_t *getNextPrefix(BlockPrefix_t *p) { /* return addr of next block (prefix), or 0 if last */
+BlockPrefix_t *getNextPrefix(BlockPrefix_t *p){ /* return addr of next block (prefix), or 0 if last */
     BlockPrefix_t *np = computeNextPrefixAddr(p);
     if ((void*)np < (void *)arenaEnd)
-	return np;
+        return np;
     else
-	return (BlockPrefix_t *)0;
+        return (BlockPrefix_t *)0;
 }
 
-BlockPrefix_t *getPrevPrefix(BlockPrefix_t *p) { /* return addr of prev block, or 0 if first */
+BlockPrefix_t *getPrevPrefix(BlockPrefix_t *p){ /* return addr of prev block, or 0 if first */
     BlockSuffix_t *ps = computePrevSuffixAddr(p);
     if ((void *)ps > (void *)arenaBegin)
-	return ps->prefix;
+        return ps->prefix;
     else
-	return (BlockPrefix_t *)0;
+        return (BlockPrefix_t *)0;
 }
 
-BlockPrefix_t *coalescePrev(BlockPrefix_t *p) {	/* coalesce p with prev, return prev if coalesced, otherwise p */
+BlockPrefix_t *coalescePrev(BlockPrefix_t *p){	/* coalesce p with prev, return prev if coalesced, otherwise p */
     BlockPrefix_t *prev = getPrevPrefix(p);
-    if (p && prev && (!p->allocated) && (!prev->allocated)) {
-	makeFreeBlock(prev, ((void *)computeNextPrefixAddr(p)) - (void *)prev);
-	return prev;
+    if (p && prev && (!p->allocated) && (!prev->allocated)){
+        makeFreeBlock(prev, ((void *)computeNextPrefixAddr(p)) - (void *)prev);
+        return prev;
     }
     return p;
-}    
+}
 
 
-void coalesce(BlockPrefix_t *p) {	/* coalesce p with prev & next */
-    if (p != (void *)0) {
+void coalesce(BlockPrefix_t *p){	/* coalesce p with prev & next */
+    if (p != (void *)0){
         BlockPrefix_t *next;
-	p = coalescePrev(p);
-	next = getNextPrefix(p);
-	if (next) 
-	    coalescePrev(next);
+        p = coalescePrev(p);
+        next = getNextPrefix(p);
+        if (next)
+            coalescePrev(next);
     }
 }
 
 int growingDisabled = 1;	/* true: don't grow arena! (needed for cygwin) */
 
-BlockPrefix_t *growArena(size_t s) { /* this won't work under cygwin since runtime uses brk()!! */
+BlockPrefix_t *growArena(size_t s){ /* this won't work under cygwin since runtime uses brk()!! */
     void *n;
     BlockPrefix_t *p;
     if (growingDisabled)
-	return (BlockPrefix_t *)0;
+        return (BlockPrefix_t *)0;
     s += (prefixSize + suffixSize);
     if (s < DEFAULT_BRKSIZE)
-	s = DEFAULT_BRKSIZE;
+        s = DEFAULT_BRKSIZE;
     n = sbrk(s);
     if ((n == 0) || (n != arenaEnd)) /* fail if brk moved or failed! */
-	return 0;
+        return 0;
     arenaEnd = n + s;		/* new end */
     p = makeFreeBlock(n, s);	/* create new block */
     p = coalescePrev(p);	/* coalesce with old arena end  */
@@ -146,98 +146,139 @@ BlockPrefix_t *growArena(size_t s) { /* this won't work under cygwin since runti
 }
 
 
-int pcheck(void *p) {		/* check that pointer is within arena */
+int pcheck(void *p){		/* check that pointer is within arena */
     return (p >= (void *)arenaBegin && p < (void *)arenaEnd);
 }
 
 
-void arenaCheck() {		/* consistency check */
+void arenaCheck(){		/* consistency check */
     BlockPrefix_t *p = arenaBegin;
     size_t amtFree = 0, amtAllocated = 0;
     int numBlocks = 0;
-    while (p != 0) {		/* walk through arena */
-	fprintf(stderr, "  checking from %p, size=%8zd, allocated=%d...\n",
-		p, computeUsableSpace(p), p->allocated);
-	assert(pcheck(p));	/* p must remain within arena */
-	assert(pcheck(p->suffix)); /* suffix must be within arena */
-	assert(p->suffix->prefix == p);	/* suffix should reference prefix */
-	if (p->allocated) 	/* update allocated & free space */
-	    amtAllocated += computeUsableSpace(p);
-	else
-	    amtFree += computeUsableSpace(p);
-	numBlocks += 1;
-	p = computeNextPrefixAddr(p);
-	if (p == arenaEnd) {
-	    break;
-	} else {
-	    assert(pcheck(p));
-	}
+    while (p != 0){		/* walk through arena */
+        fprintf(stderr, "  checking from %p, size=%8zd, allocated=%d...\n",
+                p, computeUsableSpace(p), p->allocated);
+        assert(pcheck(p));	/* p must remain within arena */
+        assert(pcheck(p->suffix)); /* suffix must be within arena */
+        assert(p->suffix->prefix == p);	/* suffix should reference prefix */
+        if (p->allocated) 	/* update allocated & free space */
+            amtAllocated += computeUsableSpace(p);
+        else
+            amtFree += computeUsableSpace(p);
+        numBlocks += 1;
+        p = computeNextPrefixAddr(p);
+        if (p == arenaEnd){
+            break;
+        } else{
+            assert(pcheck(p));
+        }
     }
     fprintf(stderr,
-	    " mcheck: numBlocks=%d, amtAllocated=%zdk, amtFree=%zdk, arenaSize=%zdk\n",
-	    numBlocks,
-	    (size_t)amtAllocated / 1024LL,
-	    (size_t)amtFree/1024LL,
-	    ((size_t)arenaEnd - (size_t)arenaBegin) / 1024);
+            " mcheck: numBlocks=%d, amtAllocated=%zdk, amtFree=%zdk, arenaSize=%zdk\n",
+            numBlocks,
+            (size_t)amtAllocated / 1024LL,
+            (size_t)amtFree/1024LL,
+            ((size_t)arenaEnd - (size_t)arenaBegin) / 1024);
 }
 
-BlockPrefix_t *findFirstFit(size_t s) {	/* find first block with usable space > s */
+BlockPrefix_t *findFirstFit(size_t s){	/* find first block with usable space > s */
     BlockPrefix_t *p = arenaBegin;
-    while (p) {
-	if (!p->allocated && computeUsableSpace(p) >= s)
-	    return p;
-	p = getNextPrefix(p);
+    while (p){
+        if (!p->allocated && computeUsableSpace(p) >= s)
+            return p;
+        p = getNextPrefix(p);
+    }
+    return growArena(s);
+}
+BlockPrefix_t *lastAllocated = (void *)0;
+BlockPrefix_t *findNextFit(size_t s){	//TODO: wrap around the search until you reach where you started
+    BlockPrefix_t *p = lastAllocated;
+    while (p){
+        if (!p->allocated && computeUsableSpace(p) >= s){
+            lastAllocated = getNextPrefix(p);
+            return p;
+        }
+        p = getNextPrefix(p);
+    }
+    while(p != lastAllocated){
+        if (!p->allocated && computeUsableSpace(p) >= s){
+            lastAllocated = getNextPrefix(p);
+            return p;
+        }
+        p = getNextPrefix(p);
     }
     return growArena(s);
 }
 
 /* conversion between blocks & regions (offset of prefixSize */
 
-BlockPrefix_t *regionToPrefix(void *r) {
-  if (r)
-    return r - prefixSize;
-  else
-    return 0;
+BlockPrefix_t *regionToPrefix(void *r){
+    if (r)
+        return r - prefixSize;
+    else
+        return 0;
 }
 
 
-void *prefixToRegion(BlockPrefix_t *p) {
-  void * vp = p;
-  if (p)
-    return vp + prefixSize;
-  else
-    return 0;
+void *prefixToRegion(BlockPrefix_t *p){
+    void * vp = p;
+    if (p)
+        return vp + prefixSize;
+    else
+        return 0;
 }
 
 /* these really are equivalent to malloc & free */
 
-void *firstFitAllocRegion(size_t s) {
-  size_t asize = align8(s);
-  BlockPrefix_t *p;
-  if (arenaBegin == 0)		/* arena uninitialized? */
-    initializeArena();
-  p = findFirstFit(s);		/* find a block */
-  if (p) {			/* found a block */
-    size_t availSize = computeUsableSpace(p);
-    if (availSize >= (asize + prefixSize + suffixSize + 8)) { /* split block? */
-      void *freeSliverStart = (void *)p + prefixSize + suffixSize + asize;
-      void *freeSliverEnd = computeNextPrefixAddr(p);
-      makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
-      makeFreeBlock(p, freeSliverStart - (void *)p); /* piece being allocated */
+void *firstFitAllocRegion(size_t s){
+    size_t asize = align8(s);
+    BlockPrefix_t *p;
+    if (arenaBegin == 0)		/* arena uninitialized? */
+        initializeArena();
+    p = findFirstFit(s);		/* find a block */
+    if (p){			/* found a block */
+        size_t availSize = computeUsableSpace(p);
+        if (availSize >= (asize + prefixSize + suffixSize + 8)){ /* split block? */
+            void *freeSliverStart = (void *)p + prefixSize + suffixSize + asize;
+            void *freeSliverEnd = computeNextPrefixAddr(p);
+            makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
+            makeFreeBlock(p, freeSliverStart - (void *)p); /* piece being allocated */
+        }
+        p->allocated = 1;		/* mark as allocated */
+        return prefixToRegion(p);	/* convert to *region */
+    } else{			/* failed */
+        return (void *)0;
     }
-    p->allocated = 1;		/* mark as allocated */
-    return prefixToRegion(p);	/* convert to *region */
-  } else {			/* failed */
-    return (void *)0;
-  }
-  
+
+}
+void *nextFitAllocRegion(size_t s){
+    size_t asize = align8(s);
+    BlockPrefix_t *p;
+    if (arenaBegin == 0)		/* arena uninitialized? */
+        initializeArena();
+    p = findNextFit(s);		/* find a block */
+    if (p){			/* found a block */
+        size_t availSize = computeUsableSpace(p);
+        if (availSize >= (asize + prefixSize + suffixSize + 8)){ /* split block? */
+            void *freeSliverStart = (void *)p + prefixSize + suffixSize + asize;
+            void *freeSliverEnd = computeNextPrefixAddr(p);
+            makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
+            lastAllocated = freeSliverStart;
+            makeFreeBlock(p, freeSliverStart - (void *)p); /* piece being allocated */
+        }
+        p->allocated = 1;		/* mark as allocated */
+        return prefixToRegion(p);	/* convert to *region */
+    } else{			/* failed */
+        return (void *)0;
+    }
+
 }
 
-void freeRegion(void *r) {
-    if (r != 0) {
-	BlockPrefix_t *p = regionToPrefix(r); /* convert to block */
-	p->allocated = 0;	/* mark as free */
-	coalesce(p);
+void freeRegion(void *r){
+    if (r != 0){
+        BlockPrefix_t *p = regionToPrefix(r); /* convert to block */
+        p->allocated = 0;	/* mark as free */
+        coalesce(p);
     }
 }
 
@@ -251,22 +292,42 @@ void freeRegion(void *r) {
    TODO: if the successor 's' to r's block is free, and there is sufficient space
    in r + s, then just adjust sizes of r & s.
 */
-void *resizeRegion(void *r, size_t newSize) {
-  int oldSize;
-  if (r != (void *)0)		/* old region existed */
-    oldSize = computeUsableSpace(regionToPrefix(r));
-  else
-    oldSize = 0;		/* non-existant regions have size 0 */
-  if (oldSize >= newSize)	/* old region is big enough */
-    return r;
-  else {			/* allocate new region & copy old data */
-    char *o = (char *)r;	/* treat both regions as char* */
-    char *n = (char *)firstFitAllocRegion(newSize); 
-    int i;
-    for (i = 0; i < oldSize; i++) /* copy byte-by-byte, should use memcpy */
-      n[i] = o[i];
-    freeRegion(o);		/* free old region */
-    return (void *)n;
-  }
+void *resizeRegion(void *r, size_t newSize){
+    int oldSize;
+    BlockPrefix_t *p = regionToPrefix(r);
+    BlockPrefix_t *next = computeNextPrefixAddr(p);
+    if (r != (void *)0)		/* old region existed */
+        oldSize = computeUsableSpace(regionToPrefix(r));
+    else
+        oldSize = 0;		/* non-existant regions have size 0 */
+    if (oldSize >= newSize)	/* old region is big enough */
+        return r;
+    else if(next){
+        size_t tlength = (void *)(next->suffix)-r;
+        if(next->allocated == 0 && tlength >= newSize){
+            if(tlength >= newSize + prefixSize + suffixSize + 8){//split the region
+                size_t asize = align8(newSize);
+                void *freeSliverStart = (void *)p + prefixSize + suffixSize + asize;
+                void *freeSliverEnd = computeNextPrefixAddr(next);
+                makeFreeBlock(freeSliverStart, freeSliverEnd - freeSliverStart);
+                BlockSuffix_t *s = freeSliverStart-suffixSize;
+                s->prefix = p;
+                p->suffix = s;
+                return p;
+            }
+            p->suffix = next->suffix;
+            p->suffix->prefix = p;
+            return p;
+        }
+    }
+    else{			/* allocate new region & copy old data */
+        char *o = (char *)r;	/* treat both regions as char* */
+        char *n = (char *)firstFitAllocRegion(newSize);
+        int i;
+        for (i = 0; i < oldSize; i++) /* copy byte-by-byte, should use memcpy */
+            n[i] = o[i];
+        freeRegion(o);		/* free old region */
+        return (void *)n;
+    }
 }
 
