@@ -68,6 +68,7 @@ BlockPrefix_t *makeFreeBlock(void *addr, size_t size){
 
 /* lowest & highest address in arena (global vars) */
 BlockPrefix_t *arenaBegin = (void *)0;
+BlockPrefix_t *lastAllocated = (void *)0;
 void *arenaEnd = 0;
 
 void initializeArena(){
@@ -75,6 +76,7 @@ void initializeArena(){
         return;
     arenaBegin = makeFreeBlock(sbrk(DEFAULT_BRKSIZE), DEFAULT_BRKSIZE);
     arenaEnd = ((void *)arenaBegin) + DEFAULT_BRKSIZE;
+    lastAllocated = arenaBegin;
 }
 
 size_t computeUsableSpace(BlockPrefix_t *p){ /* useful space within a block */
@@ -190,8 +192,7 @@ BlockPrefix_t *findFirstFit(size_t s){	/* find first block with usable space > s
     }
     return growArena(s);
 }
-BlockPrefix_t *lastAllocated = (void *)0;
-BlockPrefix_t *findNextFit(size_t s){	//TODO: wrap around the search until you reach where you started
+BlockPrefix_t *findNextFit(size_t s){
     BlockPrefix_t *p = lastAllocated;
     while (p){
         if (!p->allocated && computeUsableSpace(p) >= s){
